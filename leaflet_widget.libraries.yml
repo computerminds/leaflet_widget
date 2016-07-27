@@ -19,10 +19,11 @@ leaflet.draw:
       url: https://github.com/Leaflet/Leaflet.draw/blob/master/MIT-LICENSE.md
       gpl-compatible: true
   js:
-    /libraries/Leaflet.draw/dist/leaflet.draw.js	: {}
+    /libraries/Leaflet.draw/dist/leaflet.draw.js: {}
   css:
     theme:
-      /libraries/Leaflet.draw/dist/leaflet.draw.css	: {}
+      /libraries/Leaflet.draw/dist/leaflet.draw.css:
+        preprocess: false
   dependencies:
     - leaflet/leaflet
 
