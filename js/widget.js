@@ -28,13 +28,14 @@
         this.settings = widgetSettings;
         this.container = $(map_container).parent();
         this.wkt_selector = this.settings.wktElement;
-        this.features = [];
         this.last_value = '';
         this.default_marker_settings = {
             draggable: true
         };
 
         this.map = undefined;
+        this.drawingLayer = undefined;
+        this.drawingControl = undefined;
         this.set_leaflet_map(lMap);
         // If map is initialised (or re-initialised) then use the new instance.
         this.container.on('leaflet.map', $.proxy(function (event, _m, lMap) {
@@ -54,9 +55,40 @@
     Drupal.leaflet_widget.prototype.set_leaflet_map = function (map) {
         if (map != undefined) {
             this.map = map;
-            this.map.on('click', $.proxy(function (e) {
-                this.map_click(e.latlng)
+
+            // Add our drawing layer.
+            this.drawingLayer = new L.FeatureGroup();
+            this.map.addLayer(this.drawingLayer);
+
+            var drawingOptions = {
+                edit: {
+                    featureGroup: this.drawingLayer,
+                    remove: false
+                },
+                draw: {
+                    circle: false,
+                }
+
+            };
+            this.drawingControl = new L.Control.Draw(drawingOptions);
+            this.map.addControl(this.drawingControl);
+            this.map.on('draw:created', $.proxy(function (e) {
+                var layer = e.layer;
+                this.drawingLayer.clearLayers();
+                this.drawingLayer.addLayer(layer);
+                this.update_text();
+
             }, this));
+
+            this.map.on('draw:edited', $.proxy(function (e) {
+                var layers = e.layers;
+                this.drawingLayer.clearLayers();
+                layers.eachLayer($.proxy(function (layer) {
+                    this.drawingLayer.addLayer(layer);
+                }, this));
+                this.update_text();
+            }, this));
+
             this.update_map();
         }
     };
@@ -81,14 +113,8 @@
 
         // If we currently have a map, clear all markers.
         if (this.map != undefined) {
-            for (i in this.features) {
-                if (this.features.hasOwnProperty(i)) {
-                    this.map.removeLayer(this.features[i]);
-                }
-            }
+            this.drawingLayer.clearLayers();
         }
-
-        this.features.length = 0;
 
         // Restore update_text function.
         if (_update_text_func) {
@@ -97,52 +123,37 @@
     };
 
     /**
-     * Reacts when the map is clicked.
+     * Update the WKT text input field.
      */
-    Drupal.leaflet_widget.prototype.map_click = function (latlng) {
-        // If multiple points are allowed, add a new point, else move the existing marker.
-        if (this.settings['multiple']) {
-            if (this.features.length < this.settings['cardinality']) {
-                this.add_new_marker(L.marker(latlng, this.default_marker_settings));
-                this.update_text();
-            }
-            else {
-                alert('Cannot add more than ' + this.settings['cardinality'] + 'points.');
-            }
+    Drupal.leaflet_widget.prototype.update_text = function () {
+        if (this.drawingLayer.getLayers().length == 0) {
+            $(this.wkt_selector, this.container).val('');
+        }
+        else if (this.drawingLayer.getLayers().length == 1) {
+            var wkt = new Wkt.Wkt();
+            var layers = this.drawingLayer.getLayers();
+            wkt.fromObject(layers[0].toGeoJSON().geometry);
+            $(this.wkt_selector, this.container).val(wkt.write());
         }
         else {
-            if (this.features.length == 0) {
-                this.add_new_marker(L.marker(latlng, this.default_marker_settings));
-                this.update_text();
-            }
-            else {
-                // Move the existing marker.
-                // @todo this only works for L.marker elements, not e.g. polygons.
-                this.features[0].setLatLng(latlng);
-            }
+          if (window.console) console.error("Array of " + this.drawingLayer.getLayers().length + " points? Not sure what to do.")
         }
     };
 
     /**
-     * Add a new marker object.
+     * Set visibility and readonly attribute of the wkt input element.
+     */
+    Drupal.leaflet_widget.prototype.update_wkt_state = function () {
+        $('.form-item', this.container).toggle(!this.settings.inputHidden);
+        $(this.wkt_selector, this.container).prop('readonly', this.settings.inputReadonly);
+    };
+
+    /**
+     * Update the leaflet map from text.
      */
     Drupal.leaflet_widget.prototype.add_new_marker = function (marker) {
         if (this.map != undefined) {
-            // Add marker to the map.
-            this.features.push(marker);
-            marker.addTo(this.map);
-
-            // Delete the marker on right click.
-            marker.on('contextmenu', $.proxy(function () {
-                this.map.removeLayer(marker);
-            }, this));
-
-            // Make sure the text is updated, when the marker is removed or moved.
-            marker.on('remove', $.proxy(function (e) {
-                this.features.splice($.inArray(e.target, this.features), 1);
-                this.update_text();
-            }, this));
-            marker.on('move', $.proxy(this.update_text, this));
+            this.drawingLayer.addLayer(marker);
 
             // Pan the map to the feature
             if (this.settings.autoCenter) {
@@ -154,31 +165,6 @@
                 }
             }
         }
-    };
-
-    /**
-     * Update the WKT text input field.
-     */
-    Drupal.leaflet_widget.prototype.update_text = function () {
-        if (this.features.length == 0) {
-            $(this.wkt_selector, this.container).val('');
-        }
-        else if (this.features.length == 1) {
-            var wkt = new Wkt.Wkt();
-            wkt.fromObject(this.features[0]);
-            $(this.wkt_selector, this.container).val(wkt.write());
-        }
-        else {
-          if (window.console) console.error("Array of " + this.features.length + " points? Not sure what to do.")
-        }
-    };
-
-    /**
-     * Set visibility and readonly attribute of the wkt input element.
-     */
-    Drupal.leaflet_widget.prototype.update_wkt_state = function () {
-        $('.form-item', this.container).toggle(!this.settings.inputHidden);
-        $(this.wkt_selector, this.container).prop('readonly', this.settings.inputReadonly);
     };
 
     /**
