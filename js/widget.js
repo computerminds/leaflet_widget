@@ -30,7 +30,7 @@
         this.wkt_selector = this.settings.wktElement;
         this.last_value = '';
         this.default_marker_settings = {
-            draggable: true
+            draggable: false
         };
 
         this.map = undefined;
