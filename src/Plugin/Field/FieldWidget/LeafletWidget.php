@@ -6,8 +6,10 @@
 
 namespace Drupal\leaflet_widget\Plugin\Field\FieldWidget;
 
+use Drupal\Component\Utility\NestedArray;
 use Drupal\Core\Field\FieldItemListInterface;
 use Drupal\Core\Form\FormStateInterface;
+use Drupal\geofield\GeoPHP\GeoPHPInterface;
 use Drupal\geofield\Plugin\Field\FieldWidget\GeofieldDefaultWidget;
 
 /**
@@ -43,6 +45,9 @@ class LeafletWidget extends GeofieldDefaultWidget {
       'input' => array(
         'show' => TRUE,
         'readonly' => FALSE,
+      ),
+      'upload' => array(
+        'show' => FALSE,
       )
     );
   }
@@ -131,6 +136,17 @@ class LeafletWidget extends GeofieldDefaultWidget {
       )
     );
 
+    $upload_settings = $this->getSetting('upload');
+    $form['upload'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Upload Settings'),
+    );
+    $form['upload']['show'] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Show file upload input element'),
+      '#default_value' => $upload_settings['show'],
+    );
+
     return $form;
   }
 
@@ -154,6 +170,7 @@ class LeafletWidget extends GeofieldDefaultWidget {
     // Determine map settings and add map element.
     $map_settings = $this->getSetting('map');
     $input_settings = $this->getSetting('input');
+    $upload_settings = $this->getSetting('input');
     $map = leaflet_map_get_info($map_settings['leaflet_map']);
     $map['settings']['center'] = $map_settings['center'];
     $map['settings']['zoom'] = $map_settings['zoom'];
@@ -178,7 +195,62 @@ class LeafletWidget extends GeofieldDefaultWidget {
     // Settings and geo-data are passed to the widget keyed by field id.
     $element['map']['#attached']['drupalSettings']['leaflet_widget'] = array($element['map']['#map_id'] => $js_settings);
 
+    if ($upload_settings['show']) {
+      $element['upload']['#tree'] = TRUE;
+      $element['upload']['file'] = array(
+        '#type' => 'managed_file',
+        '#title' => $this->t('geoJSON file upload'),
+        '#upload_validators' => array(
+          'file_validate_extensions' => array(
+            'geojson', 'json',
+          ),
+        ),
+      );
+      $element['upload']['submit'] = array(
+        '#type' => 'submit',
+        '#value' => $this->t('Replace Geodata with uploaded file.'),
+        '#submit' => array(array(get_class($this), 'paragraphsItemSubmit')),
+      );
+    }
+
     return $element;
+  }
+
+  public static function paragraphsItemSubmit(array $form, FormStateInterface $form_state) {
+    $button = $form_state->getTriggeringElement();
+
+    // Get the lump of form.
+    $element = NestedArray::getValue($form, array_slice($button['#array_parents'], 0, -3));
+
+    $field_name = $element['#field_name'];
+
+    // Extract the values from $form_state->getValues().
+    $key_exists = NULL;
+    $values = NestedArray::getValue($form_state->getValues(), $element['#parents'], $key_exists);
+
+    if (!empty($values[0]['upload']['file'][0])) {
+      if ($file = file_load($values[0]['upload']['file'][0])) {
+        // Load the file, parse the text and insert.
+        try {
+          /** @var GeoPHPInterface $geophp */
+          $geophp = \Drupal::service('geofield.geophp')->load(file_get_contents($file->getFileUri()), 'json');
+          // Slight tweak, if we have a geometrycollection of only one item, then unwrap.
+          if ($geophp->geometryType() == 'GeometryCollection' && $geophp->numGeometries() == 1) {
+            $geophp = $geophp->getComponents()[0];
+          }
+
+          $wkt = $geophp->out('wkt');
+          $user_input = $form_state->getUserInput();
+          $user_input['field_geodata'][0]['value'] = $wkt;
+          $form_state->setUserInput($user_input);
+          drupal_set_message(t('Replaced Geodata with uploaded geoJSON. Save this entity to make this change permanent'));
+
+        }
+        catch (\Exception $e) {}
+      }
+    }
+
+    $form_state->setRebuild();
   }
 
 }
