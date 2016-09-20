@@ -199,24 +199,25 @@ class LeafletWidget extends GeofieldDefaultWidget {
       $element['upload']['#tree'] = TRUE;
       $element['upload']['file'] = array(
         '#type' => 'managed_file',
-        '#title' => $this->t('geoJSON file upload'),
+        '#description' => $this->t('You may upload a file of geodata in one of the following formats to convert to WKT: geojson, json, kml, wkt, wkb, gpx, google_geocode'),
+        '#title' => $this->t('Geodata file upload'),
         '#upload_validators' => array(
           'file_validate_extensions' => array(
-            'geojson', 'json',
+            implode(' ', ['geojson', 'json', 'kml', 'wkt', 'wkb', 'gpx', 'google_geocode']),
           ),
         ),
       );
       $element['upload']['submit'] = array(
         '#type' => 'submit',
         '#value' => $this->t('Replace Geodata with uploaded file.'),
-        '#submit' => array(array(get_class($this), 'paragraphsItemSubmit')),
+        '#submit' => array(array(get_class($this), 'geoDataReplaceSubmit')),
       );
     }
 
     return $element;
   }
 
-  public static function paragraphsItemSubmit(array $form, FormStateInterface $form_state) {
+  public static function geoDataReplaceSubmit(array $form, FormStateInterface $form_state) {
     $button = $form_state->getTriggeringElement();
 
     // Get the lump of form.
@@ -232,8 +233,36 @@ class LeafletWidget extends GeofieldDefaultWidget {
       if ($file = file_load($values[0]['upload']['file'][0])) {
         // Load the file, parse the text and insert.
         try {
+          // Get the file extension that has been uploaded.
+          $extension = substr($file->getFilename(), 1 + strrpos($file->getFilename(), '.'));
+          switch ($extension) {
+            case 'json':
+            case 'geojson':
+              $type = 'json';
+              break;
+
+            case 'kml':
+              $type = 'kml';
+              break;
+
+            case 'wkt':
+              $type = 'wkt';
+              break;
+
+            case 'wkb':
+              $type = 'wkb';
+              break;
+
+            case 'gpx':
+              $type = 'gpx';
+              break;
+
+            case 'google_geocode':
+              $type = 'google_geocode';
+              break;
+          }
           /** @var GeoPHPInterface $geophp */
-          $geophp = \Drupal::service('geofield.geophp')->load(file_get_contents($file->getFileUri()), 'json');
+          $geophp = \Drupal::service('geofield.geophp')->load(file_get_contents($file->getFileUri()), $type);
           // Slight tweak, if we have a geometrycollection of only one item, then unwrap.
           if ($geophp->geometryType() == 'GeometryCollection' && $geophp->numGeometries() == 1) {
             $geophp = $geophp->getComponents()[0];
@@ -246,7 +275,9 @@ class LeafletWidget extends GeofieldDefaultWidget {
           drupal_set_message(t('Replaced Geodata with uploaded geoJSON. Save this entity to make this change permanent'));
 
         }
-        catch (\Exception $e) {}
+        catch (\Exception $e) {
+          drupal_set_message(t('Sorry, failed to replace the geodata with the uploaded data.'), 'error');
+        }
       }
     }
 
